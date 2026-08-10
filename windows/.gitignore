@@ -1,0 +1,73 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub/
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter_tool_state
+.flutter_tool_state.json
+
+# Flutter generated files
+flutter/ephemeral/
+
+# Android
+.gradle/
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# macOS
+macos/Pods/
+macos/Flutter/ephemeral/
+macos/Flutter/Generated.xcconfig
+macos/Flutter/flutter_export_environment.sh
+
+# Windows
+windows/flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Visual Studio
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+x64/
+x86/
+*.cache
+!.cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# API keys / credentials
+*.pem
+*.key
+*.p12
+*.jks
+google-services.json
+GoogleService-Info.plist
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
