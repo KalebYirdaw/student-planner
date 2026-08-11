@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'document_model.dart';
 
@@ -14,6 +16,13 @@ class NotesScreen extends StatefulWidget {
 }
 
 class _NotesScreenState extends State<NotesScreen> {
+  // ============================================================
+  // STORAGE KEYS
+  // ============================================================
+
+  static const String _notesStorageKey = 'student_planner_notes';
+  static const String _documentsStorageKey = 'student_planner_documents';
+
   // ============================================================
   // NOTES DATA
   // ============================================================
@@ -39,9 +48,127 @@ class _NotesScreenState extends State<NotesScreen> {
 
   final List<DocumentModel> _documents = [];
 
+  // ============================================================
+  // STATE
+  // ============================================================
+
   String _searchQuery = '';
 
   bool _isPickingDocument = false;
+  bool _isLoading = true;
+
+  // ============================================================
+  // INIT
+  // ============================================================
+
+  @override
+  void initState() {
+    super.initState();
+
+    _loadSavedData();
+  }
+
+  // ============================================================
+  // LOAD SAVED DATA
+  // ============================================================
+
+  Future<void> _loadSavedData() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+
+      // ----------------------------------------------------------
+      // LOAD NOTES
+      // ----------------------------------------------------------
+
+      final savedNotes = preferences.getString(_notesStorageKey);
+
+      if (savedNotes != null && savedNotes.isNotEmpty) {
+        final decodedNotes = jsonDecode(savedNotes);
+
+        if (decodedNotes is List) {
+          _notes
+            ..clear()
+            ..addAll(
+              decodedNotes.whereType<Map>().map(
+                (note) => {
+                  'title': note['title']?.toString() ?? '',
+                  'subject': note['subject']?.toString() ?? 'General',
+                  'content': note['content']?.toString() ?? '',
+                },
+              ),
+            );
+        }
+      }
+
+      // ----------------------------------------------------------
+      // LOAD DOCUMENTS
+      // ----------------------------------------------------------
+
+      final savedDocuments = preferences.getString(_documentsStorageKey);
+
+      if (savedDocuments != null && savedDocuments.isNotEmpty) {
+        final decodedDocuments = jsonDecode(savedDocuments);
+
+        if (decodedDocuments is List) {
+          _documents
+            ..clear()
+            ..addAll(
+              decodedDocuments.whereType<Map>().map(
+                (document) =>
+                    DocumentModel.fromJson(Map<String, dynamic>.from(document)),
+              ),
+            );
+        }
+      }
+    } catch (_) {
+      // If saved data cannot be read, the app continues with
+      // the default empty/current data.
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = false;
+    });
+  }
+
+  // ============================================================
+  // SAVE NOTES
+  // ============================================================
+
+  Future<void> _saveNotes() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+
+      final encodedNotes = jsonEncode(_notes);
+
+      await preferences.setString(_notesStorageKey, encodedNotes);
+    } catch (_) {
+      // Do not crash the application if local persistence fails.
+    }
+  }
+
+  // ============================================================
+  // SAVE DOCUMENTS
+  // ============================================================
+
+  Future<void> _saveDocuments() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+
+      final encodedDocuments = jsonEncode(
+        _documents.map((document) {
+          return document.toJson();
+        }).toList(),
+      );
+
+      await preferences.setString(_documentsStorageKey, encodedDocuments);
+    } catch (_) {
+      // Do not crash the application if local persistence fails.
+    }
+  }
 
   // ============================================================
   // FILTER NOTES
@@ -56,7 +183,9 @@ class _NotesScreenState extends State<NotesScreen> {
 
     return _notes.where((note) {
       final title = note['title']?.toLowerCase() ?? '';
+
       final subject = note['subject']?.toLowerCase() ?? '';
+
       final content = note['content']?.toLowerCase() ?? '';
 
       return title.contains(query) ||
@@ -106,9 +235,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
                 const SizedBox(height: 20),
 
-                // ==================================================
                 // ADD NOTE
-                // ==================================================
                 ListTile(
                   leading: const CircleAvatar(child: Icon(Icons.note_outlined)),
                   title: const Text('Note'),
@@ -117,7 +244,9 @@ class _NotesScreenState extends State<NotesScreen> {
                     Navigator.of(sheetContext).pop();
 
                     Future.delayed(const Duration(milliseconds: 350), () {
-                      if (!mounted) return;
+                      if (!mounted) {
+                        return;
+                      }
 
                       _addNote();
                     });
@@ -126,9 +255,7 @@ class _NotesScreenState extends State<NotesScreen> {
 
                 const SizedBox(height: 8),
 
-                // ==================================================
                 // ADD DOCUMENT
-                // ==================================================
                 ListTile(
                   leading: const CircleAvatar(
                     child: Icon(Icons.description_outlined),
@@ -138,10 +265,10 @@ class _NotesScreenState extends State<NotesScreen> {
                   onTap: () {
                     Navigator.of(sheetContext).pop();
 
-                    // Wait until the bottom sheet has completely
-                    // closed before opening the Android file picker.
                     Future.delayed(const Duration(milliseconds: 350), () {
-                      if (!mounted) return;
+                      if (!mounted) {
+                        return;
+                      }
 
                       _pickDocument();
                     });
@@ -160,22 +287,25 @@ class _NotesScreenState extends State<NotesScreen> {
   // ============================================================
 
   Future<void> _addNote() async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     final result = await showDialog<Map<String, String>>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const _NoteDialog(),
+      builder: (_) => _NoteDialog(),
     );
 
     if (!mounted || result == null) {
       return;
     }
 
-    // Wait for the dialog route to finish.
     await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     setState(() {
       _notes.add({
@@ -184,6 +314,12 @@ class _NotesScreenState extends State<NotesScreen> {
         'content': result['content'] ?? '',
       });
     });
+
+    await _saveNotes();
+
+    if (!mounted) {
+      return;
+    }
 
     _showMessage('Note added successfully.');
   }
@@ -227,6 +363,12 @@ class _NotesScreenState extends State<NotesScreen> {
         'content': result['content'] ?? '',
       };
     });
+
+    await _saveNotes();
+
+    if (!mounted) {
+      return;
+    }
 
     _showMessage('Note updated successfully.');
   }
@@ -283,6 +425,12 @@ class _NotesScreenState extends State<NotesScreen> {
       _notes.removeAt(index);
     });
 
+    await _saveNotes();
+
+    if (!mounted) {
+      return;
+    }
+
     _showMessage('Note deleted.');
   }
 
@@ -291,7 +439,9 @@ class _NotesScreenState extends State<NotesScreen> {
   // ============================================================
 
   Future<void> _showNoteDetails(Map<String, String> note) async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     await showDialog<void>(
       context: context,
@@ -330,7 +480,6 @@ class _NotesScreenState extends State<NotesScreen> {
   // ============================================================
 
   Future<void> _pickDocument() async {
-    // Prevent multiple file pickers from opening.
     if (_isPickingDocument) {
       return;
     }
@@ -339,13 +488,14 @@ class _NotesScreenState extends State<NotesScreen> {
       return;
     }
 
-    _isPickingDocument = true;
+    setState(() {
+      _isPickingDocument = true;
+    });
+
+    String? successMessage;
+    String? errorMessage;
 
     try {
-      // ========================================================
-      // OPEN ANDROID FILE PICKER
-      // ========================================================
-
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: [
@@ -363,124 +513,72 @@ class _NotesScreenState extends State<NotesScreen> {
         withData: false,
       );
 
-      // User cancelled the file picker.
       if (!mounted || result == null || result.files.isEmpty) {
         return;
       }
 
       final pickedFile = result.files.single;
 
-      // ========================================================
-      // CHECK FILE PATH
-      // ========================================================
-
       final sourcePath = pickedFile.path;
 
       if (sourcePath == null || sourcePath.trim().isEmpty) {
-        _showMessage('Unable to access the selected document.');
-        return;
-      }
+        errorMessage = 'Unable to access the selected document.';
+      } else {
+        final subject = await _askForDocumentSubject();
 
-      // ========================================================
-      // ASK FOR SUBJECT
-      // ========================================================
+        if (mounted && subject != null) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
 
-      final subject = await _askForDocumentSubject();
+          if (mounted) {
+            final savedPath = await _copyDocumentToAppStorage(
+              sourcePath,
+              pickedFile.name,
+            );
 
-      if (!mounted || subject == null) {
-        return;
-      }
+            if (savedPath == null) {
+              errorMessage = 'Could not save the selected document.';
+            } else {
+              final extension = pickedFile.extension?.toLowerCase() ?? '';
 
-      // ========================================================
-      // IMPORTANT
-      //
-      // Wait for the keyboard and subject dialog to completely
-      // disappear before continuing.
-      // ========================================================
+              final document = DocumentModel(
+                name: pickedFile.name,
+                subject: subject.trim().isEmpty ? 'General' : subject.trim(),
+                path: savedPath,
+                extension: extension,
+                size: pickedFile.size,
+              );
 
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+              if (mounted) {
+                setState(() {
+                  _documents.add(document);
+                });
 
-      if (!mounted) {
-        return;
-      }
+                await _saveDocuments();
 
-      // ========================================================
-      // COPY FILE
-      // ========================================================
-
-      final savedPath = await _copyDocumentToAppStorage(
-        sourcePath,
-        pickedFile.name,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      if (savedPath == null) {
-        _showMessage('Could not save the selected document.');
-        return;
-      }
-
-      // ========================================================
-      // CREATE DOCUMENT MODEL
-      // ========================================================
-
-      final extension = pickedFile.extension?.toLowerCase() ?? '';
-
-      final document = DocumentModel(
-        name: pickedFile.name,
-        subject: subject.trim().isEmpty ? 'General' : subject.trim(),
-        path: savedPath,
-        extension: extension,
-        size: pickedFile.size,
-      );
-
-      // ========================================================
-      // WAIT FOR FILE OPERATION / ROUTE TO SETTLE
-      // ========================================================
-
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-
-      if (!mounted) {
-        return;
-      }
-
-      // ========================================================
-      // VERY IMPORTANT
-      //
-      // Schedule the setState for the next Flutter frame.
-      //
-      // This avoids rebuilding the NotesScreen while Flutter is
-      // still processing the dialog/keyboard route transition.
-      // ========================================================
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _documents.add(document);
-        });
-
-        // Schedule the SnackBar after the rebuild.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) {
-            return;
+                successMessage = '${pickedFile.name} added successfully.';
+              }
+            }
           }
-
-          _showMessage('${pickedFile.name} added successfully.');
-        });
-      });
-    } catch (e) {
-      if (!mounted) {
-        return;
+        }
       }
+    } catch (e) {
+      if (mounted) {
+        errorMessage = 'Could not add the document: $e';
+      }
+    }
 
-      _showMessage('Could not add the document: $e');
-    } finally {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
       _isPickingDocument = false;
+    });
+
+    if (errorMessage != null) {
+      _showMessage(errorMessage);
+    } else if (successMessage != null) {
+      _showMessage(successMessage);
     }
   }
 
@@ -491,18 +589,19 @@ class _NotesScreenState extends State<NotesScreen> {
   Future<String?> _askForDocumentSubject() async {
     final controller = TextEditingController();
 
+    String? result;
+
     try {
       if (!mounted) {
         return null;
       }
 
-      final result = await showDialog<String>(
+      result = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) {
           return AlertDialog(
             title: const Text('Document Subject'),
-
             content: TextField(
               controller: controller,
               autofocus: true,
@@ -515,42 +614,18 @@ class _NotesScreenState extends State<NotesScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-
             actions: [
-              // ==================================================
-              // CANCEL
-              // ==================================================
               TextButton(
                 onPressed: () {
-                  // Remove focus first.
                   FocusManager.instance.primaryFocus?.unfocus();
 
                   Navigator.of(dialogContext).pop();
                 },
                 child: const Text('Cancel'),
               ),
-
-              // ==================================================
-              // CONTINUE
-              // ==================================================
               FilledButton(
                 onPressed: () {
                   final subject = controller.text.trim();
-
-                  // IMPORTANT:
-                  //
-                  // Remove keyboard focus BEFORE closing
-                  // the dialog.
-                  //
-                  // This is specifically to prevent:
-                  //
-                  // _dependents.isEmpty
-                  //
-                  // and:
-                  //
-                  // Tried to build dirty widget in the wrong
-                  // build scope.
-                  //
 
                   FocusManager.instance.primaryFocus?.unfocus();
 
@@ -563,16 +638,12 @@ class _NotesScreenState extends State<NotesScreen> {
         },
       );
 
-      // ========================================================
-      // WAIT FOR DIALOG / KEYBOARD TRANSITION
-      // ========================================================
-
       await Future<void>.delayed(const Duration(milliseconds: 300));
-
-      return result;
     } finally {
       controller.dispose();
     }
+
+    return result;
   }
 
   // ============================================================
@@ -598,10 +669,6 @@ class _NotesScreenState extends State<NotesScreen> {
 
       File destinationFile = File(destinationPath);
 
-      // ========================================================
-      // CREATE UNIQUE NAME IF FILE ALREADY EXISTS
-      // ========================================================
-
       if (await destinationFile.exists()) {
         final timestamp = DateTime.now().millisecondsSinceEpoch;
 
@@ -624,19 +691,11 @@ class _NotesScreenState extends State<NotesScreen> {
         destinationFile = File(destinationPath);
       }
 
-      // ========================================================
-      // CHECK SOURCE
-      // ========================================================
-
       final sourceFile = File(sourcePath);
 
       if (!await sourceFile.exists()) {
         return null;
       }
-
-      // ========================================================
-      // COPY
-      // ========================================================
 
       final copiedFile = await sourceFile.copy(destinationPath);
 
@@ -695,7 +754,8 @@ class _NotesScreenState extends State<NotesScreen> {
         await file.delete();
       }
     } catch (_) {
-      // Continue removing the document from the list.
+      // Continue removing the document
+      // from the application's document list.
     }
 
     if (!mounted || index >= _documents.length) {
@@ -705,6 +765,12 @@ class _NotesScreenState extends State<NotesScreen> {
     setState(() {
       _documents.removeAt(index);
     });
+
+    await _saveDocuments();
+
+    if (!mounted) {
+      return;
+    }
 
     _showMessage('Document deleted.');
   }
@@ -727,32 +793,24 @@ class _NotesScreenState extends State<NotesScreen> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _DocumentDetailRow(label: 'Subject', value: document.subject),
-
                 const SizedBox(height: 12),
-
                 _DocumentDetailRow(label: 'Type', value: document.fileType),
-
                 const SizedBox(height: 12),
-
                 _DocumentDetailRow(
                   label: 'Size',
                   value: document.formattedSize,
                 ),
-
                 const SizedBox(height: 12),
-
                 _DocumentDetailRow(label: 'File', value: document.name),
               ],
             ),
           ),
-
           actions: [
             FilledButton(
               onPressed: () {
@@ -775,8 +833,6 @@ class _NotesScreenState extends State<NotesScreen> {
       return;
     }
 
-    // Schedule the SnackBar on the next frame so it does not
-    // interfere with a route/dialog rebuild.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -831,280 +887,255 @@ class _NotesScreenState extends State<NotesScreen> {
   @override
   Widget build(BuildContext context) {
     final notes = _filteredNotes;
+
     final documents = _filteredDocuments;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Notes & Documents')),
 
-      body: Column(
-        children: [
-          // ======================================================
-          // SEARCH
-          // ======================================================
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
-              onChanged: (value) {
-                if (!mounted) return;
-
-                setState(() {
-                  _searchQuery = value;
-                });
-              },
-
-              decoration: InputDecoration(
-                hintText: 'Search notes and documents...',
-
-                prefixIcon: const Icon(Icons.search),
-
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          if (!mounted) return;
-
-                          setState(() {
-                            _searchQuery = '';
-                          });
-                        },
-                      )
-                    : null,
-
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ),
-
-          // ======================================================
-          // MAIN CONTENT
-          // ======================================================
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                // ==================================================
-                // NOTES HEADER
-                // ==================================================
-                const Text(
-                  'Notes',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                // SEARCH
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: TextField(
+                    onChanged: (value) {
+                      if (!mounted) {
+                        return;
+                      }
+
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Search notes and documents...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                if (!mounted) {
+                                  return;
+                                }
+
+                                setState(() {
+                                  _searchQuery = '';
+                                });
+                              },
+                            )
+                          : null,
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
                 ),
 
-                const SizedBox(height: 12),
-
-                // ==================================================
-                // NOTES LIST
-                // ==================================================
-                if (notes.isEmpty)
-                  const Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(20),
-                      child: Center(child: Text('No notes found.')),
-                    ),
-                  )
-                else
-                  ...List.generate(notes.length, (index) {
-                    final note = notes[index];
-
-                    final realIndex = _notes.indexOf(note);
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.note_outlined),
-                        ),
-
-                        title: Text(
-                          note['title'] ?? '',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-
-                        subtitle: Text(
-                          '${note['subject'] ?? 'General'}\n'
-                          '${note['content'] ?? ''}',
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-
-                        isThreeLine: true,
-
-                        onTap: () {
-                          _showNoteDetails(note);
-                        },
-
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _editNote(realIndex);
-                            }
-
-                            if (value == 'delete') {
-                              _deleteNote(realIndex);
-                            }
-                          },
-
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text('Delete'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-
-                const SizedBox(height: 20),
-
-                // ==================================================
-                // DOCUMENT HEADER
-                // ==================================================
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Documents',
+                // MAIN CONTENT
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                    children: [
+                      // NOTES HEADER
+                      const Text(
+                        'Notes',
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                    ),
 
-                    Text(
-                      '${documents.length}',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(height: 12),
 
-                const SizedBox(height: 12),
-
-                // ==================================================
-                // DOCUMENT LIST
-                // ==================================================
-                if (documents.isEmpty)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.folder_open_outlined,
-                            size: 48,
-                            color: Colors.grey[600],
+                      // NOTES
+                      if (notes.isEmpty)
+                        const Card(
+                          child: Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Center(child: Text('No notes found.')),
                           ),
+                        )
+                      else
+                        ...List.generate(notes.length, (index) {
+                          final note = notes[index];
 
-                          const SizedBox(height: 12),
+                          final realIndex = _notes.indexOf(note);
 
-                          const Text(
-                            'No documents uploaded yet.',
-                            textAlign: TextAlign.center,
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: ListTile(
+                              leading: const CircleAvatar(
+                                child: Icon(Icons.note_outlined),
+                              ),
+                              title: Text(
+                                note['title'] ?? '',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${note['subject'] ?? 'General'}\n'
+                                '${note['content'] ?? ''}',
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              isThreeLine: true,
+                              onTap: () {
+                                _showNoteDetails(note);
+                              },
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _editNote(realIndex);
+                                  }
+
+                                  if (value == 'delete') {
+                                    _deleteNote(realIndex);
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+
+                      const SizedBox(height: 20),
+
+                      // DOCUMENT HEADER
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Documents',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${documents.length}',
                             style: TextStyle(
-                              fontSize: 16,
+                              color: Colors.grey[600],
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-
-                          const SizedBox(height: 6),
-
-                          Text(
-                            'Tap + to upload your '
-                            'first document.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          FilledButton.icon(
-                            onPressed: _isPickingDocument
-                                ? null
-                                : _pickDocument,
-
-                            icon: const Icon(Icons.upload_file),
-
-                            label: const Text('Upload Document'),
-                          ),
                         ],
                       ),
-                    ),
-                  )
-                else
-                  ...List.generate(documents.length, (index) {
-                    final document = documents[index];
 
-                    final realIndex = _documents.indexOf(document);
+                      const SizedBox(height: 12),
 
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          child: Icon(_documentIcon(document.extension)),
-                        ),
-
-                        title: Text(
-                          document.name,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-
-                        subtitle: Text(
-                          '${document.subject} • '
-                          '${document.fileType} • '
-                          '${document.formattedSize}',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-
-                        onTap: () {
-                          _showDocumentDetails(document);
-                        },
-
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'details') {
-                              _showDocumentDetails(document);
-                            }
-
-                            if (value == 'delete') {
-                              _deleteDocument(realIndex);
-                            }
-                          },
-
-                          itemBuilder: (context) => const [
-                            PopupMenuItem(
-                              value: 'details',
-                              child: Text('View Details'),
+                      // DOCUMENTS
+                      if (documents.isEmpty)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.folder_open_outlined,
+                                  size: 48,
+                                  color: Colors.grey[600],
+                                ),
+                                const SizedBox(height: 12),
+                                const Text(
+                                  'No documents uploaded yet.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Tap + to upload your '
+                                  'first document.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                                const SizedBox(height: 16),
+                                FilledButton.icon(
+                                  onPressed: _isPickingDocument
+                                      ? null
+                                      : _pickDocument,
+                                  icon: const Icon(Icons.upload_file),
+                                  label: const Text('Upload Document'),
+                                ),
+                              ],
                             ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Text('Delete'),
+                          ),
+                        )
+                      else
+                        ...List.generate(documents.length, (index) {
+                          final document = documents[index];
+
+                          final realIndex = _documents.indexOf(document);
+
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            child: ListTile(
+                              leading: CircleAvatar(
+                                child: Icon(_documentIcon(document.extension)),
+                              ),
+                              title: Text(
+                                document.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${document.subject} • '
+                                '${document.fileType} • '
+                                '${document.formattedSize}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onTap: () {
+                                _showDocumentDetails(document);
+                              },
+                              trailing: PopupMenuButton<String>(
+                                onSelected: (value) {
+                                  if (value == 'details') {
+                                    _showDocumentDetails(document);
+                                  }
+
+                                  if (value == 'delete') {
+                                    _deleteDocument(realIndex);
+                                  }
+                                },
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'details',
+                                    child: Text('View Details'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
+                          );
+                        }),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-        ],
-      ),
 
-      // ==========================================================
       // FLOATING ADD BUTTON
-      // ==========================================================
       floatingActionButton: FloatingActionButton(
         onPressed: _showAddMenu,
         tooltip: 'Add',
@@ -1136,7 +1167,6 @@ class _DocumentDetailRow extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
-
         Expanded(child: Text(value)),
       ],
     );
@@ -1224,7 +1254,6 @@ class _NoteDialogState extends State<_NoteDialog> {
       return;
     }
 
-    // Remove keyboard focus BEFORE closing.
     FocusManager.instance.primaryFocus?.unfocus();
 
     Navigator.of(context).pop({
@@ -1235,21 +1264,17 @@ class _NoteDialogState extends State<_NoteDialog> {
   }
 
   // ==========================================================
-  // BUILD NOTE DIALOG
+  // BUILD
   // ==========================================================
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.isEditing ? 'Edit Note' : 'Add Note'),
-
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // ==================================================
-            // ERROR MESSAGE
-            // ==================================================
             if (_errorMessage != null) ...[
               Container(
                 width: double.infinity,
@@ -1263,26 +1288,19 @@ class _NoteDialogState extends State<_NoteDialog> {
                   style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
               ),
-
               const SizedBox(height: 16),
             ],
 
-            // ==================================================
             // TITLE
-            // ==================================================
             TextField(
               controller: _titleController,
-
               autofocus: !widget.isEditing,
-
               textInputAction: TextInputAction.next,
-
               decoration: const InputDecoration(
                 labelText: 'Note title',
                 prefixIcon: Icon(Icons.title),
                 border: OutlineInputBorder(),
               ),
-
               onChanged: (_) {
                 if (_errorMessage != null) {
                   setState(() {
@@ -1294,14 +1312,10 @@ class _NoteDialogState extends State<_NoteDialog> {
 
             const SizedBox(height: 16),
 
-            // ==================================================
             // SUBJECT
-            // ==================================================
             TextField(
               controller: _subjectController,
-
               textInputAction: TextInputAction.next,
-
               decoration: const InputDecoration(
                 labelText: 'Subject',
                 prefixIcon: Icon(Icons.school_outlined),
@@ -1311,21 +1325,16 @@ class _NoteDialogState extends State<_NoteDialog> {
 
             const SizedBox(height: 16),
 
-            // ==================================================
             // CONTENT
-            // ==================================================
             TextField(
               controller: _contentController,
-
               maxLines: 6,
-
               decoration: const InputDecoration(
                 labelText: 'Note content',
                 alignLabelWithHint: true,
                 prefixIcon: Icon(Icons.notes_outlined),
                 border: OutlineInputBorder(),
               ),
-
               onChanged: (_) {
                 if (_errorMessage != null) {
                   setState(() {
@@ -1337,11 +1346,7 @@ class _NoteDialogState extends State<_NoteDialog> {
           ],
         ),
       ),
-
       actions: [
-        // ==================================================
-        // CANCEL
-        // ==================================================
         TextButton(
           onPressed: () {
             FocusManager.instance.primaryFocus?.unfocus();
@@ -1350,10 +1355,6 @@ class _NoteDialogState extends State<_NoteDialog> {
           },
           child: const Text('Cancel'),
         ),
-
-        // ==================================================
-        // SAVE
-        // ==================================================
         FilledButton(
           onPressed: _saveNote,
           child: Text(widget.isEditing ? 'Save' : 'Add'),

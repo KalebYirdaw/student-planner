@@ -14,31 +14,11 @@ class DocumentModel {
   });
 
   String get fileType {
-    switch (extension.toLowerCase()) {
-      case 'pdf':
-        return 'PDF';
-
-      case 'doc':
-      case 'docx':
-        return 'Word Document';
-
-      case 'ppt':
-      case 'pptx':
-        return 'PowerPoint';
-
-      case 'xls':
-      case 'xlsx':
-        return 'Excel';
-
-      case 'txt':
-        return 'Text File';
-
-      case 'csv':
-        return 'CSV File';
-
-      default:
-        return 'Document';
+    if (extension.isEmpty) {
+      return 'Unknown';
     }
+
+    return extension.toUpperCase();
   }
 
   String get formattedSize {
@@ -55,5 +35,27 @@ class DocumentModel {
     }
 
     return '${(size / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'subject': subject,
+      'path': path,
+      'extension': extension,
+      'size': size,
+    };
+  }
+
+  factory DocumentModel.fromJson(Map<String, dynamic> json) {
+    return DocumentModel(
+      name: json['name']?.toString() ?? '',
+      subject: json['subject']?.toString() ?? 'General',
+      path: json['path']?.toString() ?? '',
+      extension: json['extension']?.toString() ?? '',
+      size: json['size'] is int
+          ? json['size'] as int
+          : int.tryParse(json['size']?.toString() ?? '0') ?? 0,
+    );
   }
 }
