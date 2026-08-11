@@ -29,6 +29,29 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     },
   ];
 
+  final List<String> _days = const [
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+    'Sunday',
+  ];
+
+  final List<String> _times = const [
+    '08:00',
+    '09:00',
+    '10:00',
+    '11:00',
+    '12:00',
+    '13:00',
+    '14:00',
+    '15:00',
+    '16:00',
+    '17:00',
+  ];
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -37,7 +60,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       body: _scheduleItems.isEmpty
           ? const Center(
               child: Text(
-                'No schedule items yet.',
+                'No schedule items yet.\nTap + to add a class.',
+                textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 18),
               ),
             )
@@ -66,13 +90,25 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
                     isThreeLine: true,
 
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () {
-                        setState(() {
-                          _scheduleItems.removeAt(index);
-                        });
-                      },
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Edit',
+                          icon: const Icon(Icons.edit_outlined),
+                          onPressed: () {
+                            _showScheduleDialog(editIndex: index);
+                          },
+                        ),
+
+                        IconButton(
+                          tooltip: 'Delete',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () {
+                            _deleteSchedule(index);
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -80,27 +116,75 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             ),
 
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddScheduleDialog,
+        onPressed: () {
+          _showScheduleDialog();
+        },
+        tooltip: 'Add schedule',
         child: const Icon(Icons.add),
       ),
     );
   }
 
-  void _showAddScheduleDialog() {
-    String subject = '';
-    String location = '';
-    String selectedDay = 'Monday';
-    String selectedTime = '08:00';
+  void _deleteSchedule(int index) {
+    final item = _scheduleItems[index];
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Schedule'),
+
+          content: Text(
+            'Are you sure you want to delete '
+            '"${item['subject']}"?',
+          ),
+
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Cancel'),
+            ),
+
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  _scheduleItems.removeAt(index);
+                });
+
+                Navigator.of(dialogContext).pop();
+              },
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showScheduleDialog({int? editIndex}) {
+    final bool isEditing = editIndex != null;
+
+    final existingItem = isEditing ? _scheduleItems[editIndex] : null;
+
+    String subject = existingItem?['subject'] ?? '';
+
+    String location = existingItem?['location'] ?? '';
+
+    String selectedDay = existingItem?['day'] ?? 'Monday';
+
+    String selectedTime = existingItem?['time'] ?? '08:00';
 
     final formKey = GlobalKey<FormState>();
 
-    showDialog(
+    showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Text('Add Schedule'),
+              title: Text(isEditing ? 'Edit Schedule' : 'Add Schedule'),
 
               content: Form(
                 key: formKey,
@@ -110,9 +194,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextFormField(
+                        initialValue: subject,
+
                         decoration: const InputDecoration(
                           labelText: 'Subject',
                           prefixIcon: Icon(Icons.school_outlined),
+                          border: OutlineInputBorder(),
                         ),
 
                         onChanged: (value) {
@@ -131,9 +218,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                       const SizedBox(height: 16),
 
                       TextFormField(
+                        initialValue: location,
+
                         decoration: const InputDecoration(
                           labelText: 'Location',
                           prefixIcon: Icon(Icons.location_on_outlined),
+                          border: OutlineInputBorder(),
                         ),
 
                         onChanged: (value) {
@@ -157,38 +247,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Day',
                           prefixIcon: Icon(Icons.calendar_month_outlined),
+                          border: OutlineInputBorder(),
                         ),
 
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Monday',
-                            child: Text('Monday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Tuesday',
-                            child: Text('Tuesday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Wednesday',
-                            child: Text('Wednesday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Thursday',
-                            child: Text('Thursday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Friday',
-                            child: Text('Friday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Saturday',
-                            child: Text('Saturday'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Sunday',
-                            child: Text('Sunday'),
-                          ),
-                        ],
+                        items: _days.map((day) {
+                          return DropdownMenuItem<String>(
+                            value: day,
+                            child: Text(day),
+                          );
+                        }).toList(),
 
                         onChanged: (value) {
                           if (value != null) {
@@ -207,50 +274,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         decoration: const InputDecoration(
                           labelText: 'Time',
                           prefixIcon: Icon(Icons.access_time_outlined),
+                          border: OutlineInputBorder(),
                         ),
 
-                        items: const [
-                          DropdownMenuItem(
-                            value: '08:00',
-                            child: Text('08:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '09:00',
-                            child: Text('09:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '10:00',
-                            child: Text('10:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '11:00',
-                            child: Text('11:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '12:00',
-                            child: Text('12:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '13:00',
-                            child: Text('13:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '14:00',
-                            child: Text('14:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '15:00',
-                            child: Text('15:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '16:00',
-                            child: Text('16:00'),
-                          ),
-                          DropdownMenuItem(
-                            value: '17:00',
-                            child: Text('17:00'),
-                          ),
-                        ],
+                        items: _times.map((time) {
+                          return DropdownMenuItem<String>(
+                            value: time,
+                            child: Text(time),
+                          );
+                        }).toList(),
 
                         onChanged: (value) {
                           if (value != null) {
@@ -280,17 +312,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     }
 
                     setState(() {
-                      _scheduleItems.add({
+                      final updatedSchedule = {
                         'day': selectedDay,
                         'time': selectedTime,
                         'subject': subject.trim(),
                         'location': location.trim(),
-                      });
+                      };
+
+                      if (isEditing) {
+                        _scheduleItems[editIndex] = updatedSchedule;
+                      } else {
+                        _scheduleItems.add(updatedSchedule);
+                      }
                     });
 
                     Navigator.of(dialogContext).pop();
                   },
-                  child: const Text('Add'),
+
+                  child: Text(isEditing ? 'Save Changes' : 'Add'),
                 ),
               ],
             );
