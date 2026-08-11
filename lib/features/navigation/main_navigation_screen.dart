@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../home/home_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../tasks/tasks_screen.dart';
+import '../notes/notes_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -18,12 +19,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     HomeScreen(),
     ScheduleScreen(),
     TasksScreen(),
-    Center(
-      child: Text(
-        'Notes',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-      ),
-    ),
+    NotesScreen(),
     Center(
       child: Text(
         'Settings',
