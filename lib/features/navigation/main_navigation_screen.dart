@@ -4,6 +4,7 @@ import '../home/home_screen.dart';
 import '../schedule/schedule_screen.dart';
 import '../tasks/tasks_screen.dart';
 import '../notes/notes_screen.dart';
+import '../assignments/assignments_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -20,6 +21,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     ScheduleScreen(),
     TasksScreen(),
     NotesScreen(),
+    AssignmentsScreen(),
     Center(
       child: Text(
         'Settings',
@@ -65,6 +67,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             icon: Icon(Icons.note_outlined),
             selectedIcon: Icon(Icons.note),
             label: 'Notes',
+          ),
+
+          NavigationDestination(
+            icon: Icon(Icons.assignment_outlined),
+            selectedIcon: Icon(Icons.assignment),
+            label: 'Assignments',
           ),
 
           NavigationDestination(

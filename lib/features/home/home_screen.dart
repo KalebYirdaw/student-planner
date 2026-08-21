@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../assignments/assignment_model.dart';
+import '../assignments/assignment_storage_service.dart';
+import '../assignments/assignments_screen.dart';
 import '../notes/document_model.dart';
 import '../notes/notes_screen.dart';
 import '../schedule/schedule_model.dart';
@@ -31,11 +35,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _scheduleFileName = 'schedule_items.json';
 
   // ============================================================
+  // SERVICES
+  // ============================================================
+
+  final AssignmentStorageService _assignmentStorageService =
+      AssignmentStorageService();
+
+  // ============================================================
   // DATA
   // ============================================================
 
   List<ScheduleModel> _schedules = [];
   List<Map<String, dynamic>> _tasks = [];
+  List<Assignment> _assignments = [];
   List<Map<String, String>> _notes = [];
   List<DocumentModel> _documents = [];
 
@@ -48,6 +60,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _refreshTimer;
 
   // ============================================================
+  // DAILY MOTIVATION
+  // ============================================================
+
+  String _motivationalMessage = '';
+
+  final List<String> _motivationalMessages = [
+    'Small progress is still progress. Keep going! 💪',
+    'One task at a time. You have got this! 📚',
+    'Your future self will thank you for studying today. 🎯',
+    'Consistency beats motivation. Keep showing up. 🔥',
+    'Believe in yourself and keep moving forward. 🌟',
+    'You do not have to be perfect. Just keep improving. 💙',
+    'Every study session brings you one step closer to your goals. 🚀',
+    'Do something today that your future self will be proud of. 💯',
+    'Stay focused. Your goals are worth the effort. 🎓',
+    'A little progress each day adds up to big results. 📈',
+    'You are capable of more than you think. Keep pushing! 💪',
+    'Do not compare your beginning to someone else’s middle.',
+    'Hard work today creates opportunities tomorrow. 🌱',
+    'Keep going, even when progress feels slow. You are getting there. ✨',
+    'Your goals are closer than they seem. Stay consistent. 🎯',
+  ];
+
+  void _setRandomMotivationalMessage() {
+    final random = Random();
+
+    _motivationalMessage =
+        _motivationalMessages[random.nextInt(_motivationalMessages.length)];
+  }
+
+  // ============================================================
   // INITIALIZE
   // ============================================================
 
@@ -57,10 +100,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addObserver(this);
 
+    // Select one motivational message when the Dashboard opens.
+    _setRandomMotivationalMessage();
+
     _loadHomeData();
 
     // Keeps Home synchronized when another tab changes
-    // Schedule, Tasks, Notes or Documents.
+    // Schedule, Tasks, Assignments, Notes or Documents.
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _loadHomeData(showLoading: false);
@@ -106,6 +152,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final schedule = await _loadSchedules();
       final tasks = await _loadTasks();
+      final assignments = await _assignmentStorageService.loadAssignments();
       final notes = await _loadNotes();
       final documents = await _loadDocuments();
 
@@ -116,6 +163,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _schedules = schedule;
         _tasks = tasks;
+        _assignments = assignments;
         _notes = notes;
         _documents = documents;
         _isLoading = false;
@@ -361,11 +409,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ============================================================
+  // COMPLETED ASSIGNMENTS
+  // ============================================================
+
+  int get _completedAssignments {
+    return _assignments.where((assignment) => assignment.isCompleted).length;
+  }
+
+  // ============================================================
+  // TOTAL COMPLETED ITEMS
+  // ============================================================
+
+  int get _completedItems {
+    return _completedTasks + _completedAssignments;
+  }
+
+  // ============================================================
   // UPCOMING TASKS
   // ============================================================
 
   List<Map<String, dynamic>> get _upcomingTasks {
     return _tasks.where((task) => task['completed'] != true).take(3).toList();
+  }
+
+  // ============================================================
+  // UPCOMING ASSIGNMENTS
+  // ============================================================
+
+  List<Assignment> get _upcomingAssignments {
+    final assignments = _assignments
+        .where((assignment) => !assignment.isCompleted)
+        .toList();
+
+    assignments.sort((first, second) {
+      return first.dueDate.compareTo(second.dueDate);
+    });
+
+    return assignments.take(3).toList();
   }
 
   // ============================================================
@@ -411,7 +491,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   _buildGreeting(),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
+
+                  _buildMotivationCard(),
+
+                  const SizedBox(height: 28),
 
                   _buildOverview(),
 
@@ -422,6 +506,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 28),
 
                   _buildTasks(),
+
+                  const SizedBox(height: 28),
+
+                  _buildAssignments(),
 
                   const SizedBox(height: 28),
 
@@ -460,12 +548,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           greeting,
           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
         ),
+
         const SizedBox(height: 8),
+
         Text(
           'Here is your plan for today.',
           style: TextStyle(fontSize: 16, color: Colors.grey[600]),
         ),
       ],
+    );
+  }
+
+  // ============================================================
+  // MOTIVATION CARD
+  // ============================================================
+
+  Widget _buildMotivationCard() {
+    return Card(
+      elevation: 0,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: Theme.of(context).colorScheme.primaryContainer,
+              ),
+              child: Icon(
+                Icons.auto_awesome,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+
+            const SizedBox(width: 14),
+
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Daily Motivation',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  Text(
+                    _motivationalMessage,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.4,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -508,9 +653,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
             Expanded(
               child: _OverviewCard(
-                title: 'Notes',
-                value: '${_notes.length}',
-                icon: Icons.note_outlined,
+                title: 'Assignments',
+                value: '${_assignments.length}',
+                icon: Icons.assignment_outlined,
               ),
             ),
           ],
@@ -520,6 +665,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         Row(
           children: [
+            Expanded(
+              child: _OverviewCard(
+                title: 'Notes',
+                value: '${_notes.length}',
+                icon: Icons.note_outlined,
+              ),
+            ),
+
+            const SizedBox(width: 8),
+
             Expanded(
               child: _OverviewCard(
                 title: 'Documents',
@@ -533,18 +688,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Expanded(
               child: _OverviewCard(
                 title: 'Completed',
-                value: '$_completedTasks',
+                value: '$_completedItems',
                 icon: Icons.check_circle_outline,
-              ),
-            ),
-
-            const SizedBox(width: 8),
-
-            Expanded(
-              child: _OverviewCard(
-                title: 'Today',
-                value: '${_todaySchedules.length}',
-                icon: Icons.today_outlined,
               ),
             ),
           ],
@@ -621,9 +766,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             },
           )
         else
-          ...tasks.asMap().entries.map((entry) {
-            final task = entry.value;
-
+          ...tasks.map((task) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: _TaskCard(
@@ -632,6 +775,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 due: task['due']?.toString() ?? 'No date',
                 priority: task['priority']?.toString() ?? 'Medium',
               ),
+            );
+          }),
+      ],
+    );
+  }
+
+  // ============================================================
+  // ASSIGNMENTS
+  // ============================================================
+
+  Widget _buildAssignments() {
+    final assignments = _upcomingAssignments;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          title: 'Assignments',
+          onPressed: () {
+            _openPage(const AssignmentsScreen());
+          },
+        ),
+
+        const SizedBox(height: 12),
+
+        if (assignments.isEmpty)
+          _EmptyCard(
+            icon: Icons.assignment_turned_in_outlined,
+            message: 'You have no outstanding assignments.',
+            buttonText: 'Open Assignments',
+            onPressed: () {
+              _openPage(const AssignmentsScreen());
+            },
+          )
+        else
+          ...assignments.map((assignment) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _AssignmentCard(assignment: assignment),
             );
           }),
       ],
@@ -857,6 +1039,152 @@ class _TaskCard extends StatelessWidget {
         trailing: _PriorityLabel(priority: priority),
       ),
     );
+  }
+}
+
+// ============================================================
+// ASSIGNMENT CARD
+// ============================================================
+
+class _AssignmentCard extends StatelessWidget {
+  final Assignment assignment;
+
+  const _AssignmentCard({required this.assignment});
+
+  @override
+  Widget build(BuildContext context) {
+    final bool overdue = assignment.isOverdue;
+
+    final Color priorityColor = _getPriorityColor(context, assignment.priority);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  child: Icon(
+                    overdue
+                        ? Icons.warning_amber_outlined
+                        : Icons.assignment_outlined,
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        assignment.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 4),
+
+                      Text(
+                        assignment.subject,
+                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: priorityColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    assignment.priority,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: priorityColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 14),
+
+            Row(
+              children: [
+                Icon(
+                  overdue ? Icons.warning_amber : Icons.calendar_today_outlined,
+                  size: 16,
+                  color: overdue ? Colors.red : Colors.grey[600],
+                ),
+
+                const SizedBox(width: 6),
+
+                Expanded(
+                  child: Text(
+                    assignment.dueDateLabel,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: overdue ? Colors.red : Colors.grey[700],
+                    ),
+                  ),
+                ),
+
+                Text(
+                  '${assignment.progress}%',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(
+                value: (assignment.progress.clamp(0, 100)) / 100,
+                minHeight: 7,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Color _getPriorityColor(BuildContext context, String priority) {
+    switch (priority.toLowerCase()) {
+      case 'high':
+        return Colors.red;
+
+      case 'medium':
+        return Colors.orange;
+
+      case 'low':
+        return Colors.green;
+
+      default:
+        return Theme.of(context).colorScheme.primary;
+    }
   }
 }
 
