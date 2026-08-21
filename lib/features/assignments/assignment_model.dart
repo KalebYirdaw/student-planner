@@ -19,6 +19,52 @@ class Assignment {
     required this.isCompleted,
   });
 
+  /// Returns the number of whole days between today and the due date.
+  int get daysUntilDue {
+    final DateTime today = DateTime(
+      DateTime.now().year,
+      DateTime.now().month,
+      DateTime.now().day,
+    );
+
+    final DateTime due = DateTime(dueDate.year, dueDate.month, dueDate.day);
+
+    return due.difference(today).inDays;
+  }
+
+  /// Returns true when the assignment deadline has passed
+  /// and the assignment is not completed.
+  bool get isOverdue {
+    return daysUntilDue < 0 && !isCompleted;
+  }
+
+  /// Returns a human-readable description of the deadline.
+  String get dueDateLabel {
+    if (isCompleted) {
+      return 'Completed';
+    }
+
+    if (daysUntilDue < 0) {
+      final int daysOverdue = daysUntilDue.abs();
+
+      if (daysOverdue == 1) {
+        return '1 day overdue';
+      }
+
+      return '$daysOverdue days overdue';
+    }
+
+    if (daysUntilDue == 0) {
+      return 'Due today';
+    }
+
+    if (daysUntilDue == 1) {
+      return 'Due tomorrow';
+    }
+
+    return 'Due in $daysUntilDue days';
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
