@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -35,21 +34,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const String _scheduleFileName = 'schedule_items.json';
 
   // ============================================================
-  // SERVICES
-  // ============================================================
-
-  final AssignmentStorageService _assignmentStorageService =
-      AssignmentStorageService();
-
-  // ============================================================
   // DATA
   // ============================================================
 
   List<ScheduleModel> _schedules = [];
   List<Map<String, dynamic>> _tasks = [];
-  List<Assignment> _assignments = [];
   List<Map<String, String>> _notes = [];
   List<DocumentModel> _documents = [];
+  List<Assignment> _assignments = [];
 
   // ============================================================
   // STATE
@@ -60,34 +52,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _refreshTimer;
 
   // ============================================================
-  // DAILY MOTIVATION
+  // MOTIVATIONAL MESSAGES
   // ============================================================
 
-  String _motivationalMessage = '';
-
-  final List<String> _motivationalMessages = [
+  static const List<String> _motivationalMessages = [
     'Small progress is still progress. Keep going! 💪',
-    'One task at a time. You have got this! 📚',
-    'Your future self will thank you for studying today. 🎯',
-    'Consistency beats motivation. Keep showing up. 🔥',
-    'Believe in yourself and keep moving forward. 🌟',
-    'You do not have to be perfect. Just keep improving. 💙',
-    'Every study session brings you one step closer to your goals. 🚀',
-    'Do something today that your future self will be proud of. 💯',
-    'Stay focused. Your goals are worth the effort. 🎓',
-    'A little progress each day adds up to big results. 📈',
-    'You are capable of more than you think. Keep pushing! 💪',
-    'Do not compare your beginning to someone else’s middle.',
-    'Hard work today creates opportunities tomorrow. 🌱',
-    'Keep going, even when progress feels slow. You are getting there. ✨',
-    'Your goals are closer than they seem. Stay consistent. 🎯',
+    'You do not have to be perfect. Just keep moving forward. 🌱',
+    'One task at a time. You have got this! 🎯',
+    'Your future self will thank you for what you do today. 🚀',
+    'Stay consistent. Your hard work will pay off. 🔥',
+    'Believe in yourself and keep pushing forward. ⭐',
+    'Focus on progress, not perfection. 💙',
+    'Every study session brings you one step closer to your goals. 📚',
+    'You are capable of more than you think. Keep going! 💯',
+    'Make today count. Your goals are worth it. 🏆',
   ];
 
-  void _setRandomMotivationalMessage() {
-    final random = Random();
+  String get _motivationalMessage {
+    final now = DateTime.now();
 
-    _motivationalMessage =
-        _motivationalMessages[random.nextInt(_motivationalMessages.length)];
+    final startOfYear = DateTime(now.year, 1, 1);
+
+    final dayIndex = now.difference(startOfYear).inDays;
+
+    return _motivationalMessages[dayIndex % _motivationalMessages.length];
   }
 
   // ============================================================
@@ -100,13 +88,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     WidgetsBinding.instance.addObserver(this);
 
-    // Select one motivational message when the Dashboard opens.
-    _setRandomMotivationalMessage();
-
     _loadHomeData();
 
-    // Keeps Home synchronized when another tab changes
-    // Schedule, Tasks, Assignments, Notes or Documents.
     _refreshTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _loadHomeData(showLoading: false);
@@ -152,9 +135,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       final schedule = await _loadSchedules();
       final tasks = await _loadTasks();
-      final assignments = await _assignmentStorageService.loadAssignments();
       final notes = await _loadNotes();
       final documents = await _loadDocuments();
+
+      final assignmentStorage = AssignmentStorageService();
+
+      final assignments = await assignmentStorage.loadAssignments();
 
       if (!mounted) {
         return;
@@ -163,9 +149,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       setState(() {
         _schedules = schedule;
         _tasks = tasks;
-        _assignments = assignments;
         _notes = notes;
         _documents = documents;
+        _assignments = assignments;
         _isLoading = false;
       });
     } catch (_) {
@@ -417,11 +403,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ============================================================
-  // TOTAL COMPLETED ITEMS
+  // TOTAL ACADEMIC ITEMS
   // ============================================================
 
-  int get _completedItems {
+  int get _totalAcademicItems {
+    return _tasks.length + _assignments.length;
+  }
+
+  // ============================================================
+  // COMPLETED ACADEMIC ITEMS
+  // ============================================================
+
+  int get _completedAcademicItems {
     return _completedTasks + _completedAssignments;
+  }
+
+  // ============================================================
+  // ACADEMIC PROGRESS
+  // ============================================================
+
+  double get _academicProgress {
+    if (_totalAcademicItems == 0) {
+      return 0;
+    }
+
+    return _completedAcademicItems / _totalAcademicItems;
+  }
+
+  // ============================================================
+  // PROGRESS PERCENTAGE
+  // ============================================================
+
+  int get _progressPercentage {
+    return (_academicProgress * 100).round();
   }
 
   // ============================================================
@@ -441,11 +455,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         .where((assignment) => !assignment.isCompleted)
         .toList();
 
-    assignments.sort((first, second) {
-      return first.dueDate.compareTo(second.dueDate);
-    });
+    assignments.sort((a, b) => a.dueDate.compareTo(b.dueDate));
 
     return assignments.take(3).toList();
+  }
+
+  // ============================================================
+  // NEEDS ATTENTION
+  // ============================================================
+
+  List<Assignment> get _attentionAssignments {
+    final assignments = _assignments
+        .where(
+          (assignment) =>
+              !assignment.isCompleted && assignment.daysUntilDue <= 3,
+        )
+        .toList();
+
+    assignments.sort((a, b) {
+      return a.daysUntilDue.compareTo(b.daysUntilDue);
+    });
+
+    return assignments;
+  }
+
+  // ============================================================
+  // HIGH PRIORITY TASKS
+  // ============================================================
+
+  List<Map<String, dynamic>> get _attentionTasks {
+    return _tasks.where((task) {
+      final completed = task['completed'] == true;
+
+      final priority = task['priority']?.toString().toLowerCase();
+
+      return !completed && priority == 'high';
+    }).toList();
+  }
+
+  // ============================================================
+  // DOES SOMETHING NEED ATTENTION?
+  // ============================================================
+
+  bool get _hasAttentionItems {
+    return _attentionAssignments.isNotEmpty || _attentionTasks.isNotEmpty;
   }
 
   // ============================================================
@@ -491,13 +544,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   _buildGreeting(),
 
-                  const SizedBox(height: 16),
-
-                  _buildMotivationCard(),
-
-                  const SizedBox(height: 28),
+                  const SizedBox(height: 24),
 
                   _buildOverview(),
+
+                  const SizedBox(height: 20),
+
+                  _buildAcademicProgress(),
+
+                  if (_hasAttentionItems) ...[
+                    const SizedBox(height: 28),
+                    _buildNeedsAttention(),
+                  ],
 
                   const SizedBox(height: 28),
 
@@ -505,11 +563,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
                   const SizedBox(height: 28),
 
-                  _buildTasks(),
+                  _buildAssignments(),
 
                   const SizedBox(height: 28),
 
-                  _buildAssignments(),
+                  _buildTasks(),
 
                   const SizedBox(height: 28),
 
@@ -555,62 +613,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           'Here is your plan for today.',
           style: TextStyle(fontSize: 16, color: Colors.grey[600]),
         ),
-      ],
-    );
-  }
 
-  // ============================================================
-  // MOTIVATION CARD
-  // ============================================================
+        const SizedBox(height: 10),
 
-  Widget _buildMotivationCard() {
-    return Card(
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                color: Theme.of(context).colorScheme.primaryContainer,
-              ),
-              child: Icon(
-                Icons.auto_awesome,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-
-            const SizedBox(width: 14),
-
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Daily Motivation',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  Text(
-                    _motivationalMessage,
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.4,
-                      color: Colors.grey[700],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        Text(
+          _motivationalMessage,
+          style: TextStyle(
+            fontSize: 15,
+            fontStyle: FontStyle.italic,
+            color: Colors.grey[700],
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -688,12 +702,105 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Expanded(
               child: _OverviewCard(
                 title: 'Completed',
-                value: '$_completedItems',
+                value: '$_completedAcademicItems',
                 icon: Icons.check_circle_outline,
               ),
             ),
           ],
         ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // ACADEMIC PROGRESS
+  // ============================================================
+
+  Widget _buildAcademicProgress() {
+    final total = _totalAcademicItems;
+
+    final completed = _completedAcademicItems;
+
+    final progress = _academicProgress;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Your Progress',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                ),
+
+                Text(
+                  '$_progressPercentage%',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(value: progress, minHeight: 9),
+            ),
+
+            const SizedBox(height: 10),
+
+            Text(
+              total == 0
+                  ? 'Add tasks or assignments to start tracking your progress.'
+                  : '$completed of $total tasks and assignments completed.',
+              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // NEEDS ATTENTION
+  // ============================================================
+
+  Widget _buildNeedsAttention() {
+    final assignments = _attentionAssignments;
+
+    final tasks = _attentionTasks;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Needs Attention',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+
+        const SizedBox(height: 12),
+
+        ...assignments.take(3).map((assignment) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _AttentionAssignmentCard(assignment: assignment),
+          );
+        }),
+
+        ...tasks.take(3).map((task) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _AttentionTaskCard(task: task),
+          );
+        }),
       ],
     );
   }
@@ -738,6 +845,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   // ============================================================
+  // ASSIGNMENTS
+  // ============================================================
+
+  Widget _buildAssignments() {
+    final assignments = _upcomingAssignments;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(
+          title: 'Assignments',
+          onPressed: () {
+            _openPage(const AssignmentsScreen());
+          },
+        ),
+
+        const SizedBox(height: 12),
+
+        if (assignments.isEmpty)
+          _EmptyCard(
+            icon: Icons.assignment_outlined,
+            message: 'You have no outstanding assignments.',
+            buttonText: 'Open Assignments',
+            onPressed: () {
+              _openPage(const AssignmentsScreen());
+            },
+          )
+        else
+          ...assignments.map((assignment) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _AssignmentCard(assignment: assignment),
+            );
+          }),
+      ],
+    );
+  }
+
+  // ============================================================
   // TASKS
   // ============================================================
 
@@ -775,45 +921,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 due: task['due']?.toString() ?? 'No date',
                 priority: task['priority']?.toString() ?? 'Medium',
               ),
-            );
-          }),
-      ],
-    );
-  }
-
-  // ============================================================
-  // ASSIGNMENTS
-  // ============================================================
-
-  Widget _buildAssignments() {
-    final assignments = _upcomingAssignments;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionHeader(
-          title: 'Assignments',
-          onPressed: () {
-            _openPage(const AssignmentsScreen());
-          },
-        ),
-
-        const SizedBox(height: 12),
-
-        if (assignments.isEmpty)
-          _EmptyCard(
-            icon: Icons.assignment_turned_in_outlined,
-            message: 'You have no outstanding assignments.',
-            buttonText: 'Open Assignments',
-            onPressed: () {
-              _openPage(const AssignmentsScreen());
-            },
-          )
-        else
-          ...assignments.map((assignment) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _AssignmentCard(assignment: assignment),
             );
           }),
       ],
@@ -978,6 +1085,98 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // ============================================================
+// ATTENTION ASSIGNMENT CARD
+// ============================================================
+
+class _AttentionAssignmentCard extends StatelessWidget {
+  final Assignment assignment;
+
+  const _AttentionAssignmentCard({required this.assignment});
+
+  @override
+  Widget build(BuildContext context) {
+    final overdue = assignment.isOverdue;
+
+    final dueToday = assignment.daysUntilDue == 0;
+
+    String message;
+
+    if (overdue) {
+      message = assignment.dueDateLabel;
+    } else if (dueToday) {
+      message = 'Due today';
+    } else {
+      message = 'Due in ${assignment.daysUntilDue} days';
+    }
+
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Icon(
+            overdue ? Icons.warning_amber_outlined : Icons.schedule_outlined,
+          ),
+        ),
+
+        title: Text(
+          assignment.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+
+        subtitle: Text(
+          '${assignment.subject} • $message',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+
+        trailing: Text(
+          overdue ? 'OVERDUE' : 'SOON',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// ATTENTION TASK CARD
+// ============================================================
+
+class _AttentionTaskCard extends StatelessWidget {
+  final Map<String, dynamic> task;
+
+  const _AttentionTaskCard({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final title = task['title']?.toString() ?? 'Untitled Task';
+
+    final subject = task['subject']?.toString() ?? 'General';
+
+    return Card(
+      child: ListTile(
+        leading: const CircleAvatar(child: Icon(Icons.priority_high_outlined)),
+
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+
+        subtitle: Text('$subject • High priority'),
+
+        trailing: const Text(
+          'IMPORTANT',
+          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
 // SCHEDULE CARD
 // ============================================================
 
@@ -1010,6 +1209,50 @@ class _ScheduleCard extends StatelessWidget {
 }
 
 // ============================================================
+// ASSIGNMENT CARD
+// ============================================================
+
+class _AssignmentCard extends StatelessWidget {
+  final Assignment assignment;
+
+  const _AssignmentCard({required this.assignment});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Icon(
+            assignment.isOverdue
+                ? Icons.warning_amber_outlined
+                : Icons.assignment_outlined,
+          ),
+        ),
+
+        title: Text(
+          assignment.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+
+        subtitle: Text(
+          '${assignment.subject} • '
+          '${assignment.dueDateLabel}',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+
+        trailing: Text(
+          '${assignment.progress}%',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
 // TASK CARD
 // ============================================================
 
@@ -1032,159 +1275,18 @@ class _TaskCard extends StatelessWidget {
       child: ListTile(
         leading: const CircleAvatar(child: Icon(Icons.task_alt_outlined)),
 
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
 
         subtitle: Text('$subject • Due $due'),
 
         trailing: _PriorityLabel(priority: priority),
       ),
     );
-  }
-}
-
-// ============================================================
-// ASSIGNMENT CARD
-// ============================================================
-
-class _AssignmentCard extends StatelessWidget {
-  final Assignment assignment;
-
-  const _AssignmentCard({required this.assignment});
-
-  @override
-  Widget build(BuildContext context) {
-    final bool overdue = assignment.isOverdue;
-
-    final Color priorityColor = _getPriorityColor(context, assignment.priority);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  child: Icon(
-                    overdue
-                        ? Icons.warning_amber_outlined
-                        : Icons.assignment_outlined,
-                  ),
-                ),
-
-                const SizedBox(width: 12),
-
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        assignment.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-
-                      const SizedBox(height: 4),
-
-                      Text(
-                        assignment.subject,
-                        style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(width: 8),
-
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: priorityColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    assignment.priority,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: priorityColor,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 14),
-
-            Row(
-              children: [
-                Icon(
-                  overdue ? Icons.warning_amber : Icons.calendar_today_outlined,
-                  size: 16,
-                  color: overdue ? Colors.red : Colors.grey[600],
-                ),
-
-                const SizedBox(width: 6),
-
-                Expanded(
-                  child: Text(
-                    assignment.dueDateLabel,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: overdue ? Colors.red : Colors.grey[700],
-                    ),
-                  ),
-                ),
-
-                Text(
-                  '${assignment.progress}%',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: (assignment.progress.clamp(0, 100)) / 100,
-                minHeight: 7,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Color _getPriorityColor(BuildContext context, String priority) {
-    switch (priority.toLowerCase()) {
-      case 'high':
-        return Colors.red;
-
-      case 'medium':
-        return Colors.orange;
-
-      case 'low':
-        return Colors.green;
-
-      default:
-        return Theme.of(context).colorScheme.primary;
-    }
   }
 }
 
