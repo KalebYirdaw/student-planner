@@ -5,6 +5,7 @@ import '../schedule/schedule_screen.dart';
 import '../tasks/tasks_screen.dart';
 import '../notes/notes_screen.dart';
 import '../assignments/assignments_screen.dart';
+import '../settings/settings_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -16,18 +17,13 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    ScheduleScreen(),
-    TasksScreen(),
-    NotesScreen(),
-    AssignmentsScreen(),
-    Center(
-      child: Text(
-        'Settings',
-        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-      ),
-    ),
+  final List<Widget> _screens = [
+    const HomeScreen(),
+    const ScheduleScreen(),
+    const TasksScreen(),
+    const NotesScreen(),
+    const AssignmentsScreen(),
+    const SettingsScreen(),
   ];
 
   @override

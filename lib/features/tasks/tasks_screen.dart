@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../notifications/notification_service.dart';
+
 class TasksScreen extends StatefulWidget {
   const TasksScreen({super.key});
 
@@ -26,15 +28,21 @@ class _TasksScreenState extends State<TasksScreen> {
       'title': 'Programming Assignment',
       'subject': 'Programming',
       'due': 'Friday',
+      'dueDate': null,
+      'reminder': 'None',
       'priority': 'High',
       'completed': false,
+      'notificationId': null,
     },
     {
       'title': 'Database Test',
       'subject': 'Database Systems',
       'due': 'Next Monday',
+      'dueDate': null,
+      'reminder': 'None',
       'priority': 'Medium',
       'completed': false,
+      'notificationId': null,
     },
   ];
 
@@ -53,6 +61,7 @@ class _TasksScreenState extends State<TasksScreen> {
   @override
   void initState() {
     super.initState();
+
     _loadTasks();
   }
 
@@ -84,6 +93,23 @@ class _TasksScreenState extends State<TasksScreen> {
                 ),
               )
               .toList();
+
+          // Add fields introduced in newer versions.
+          for (final task in _tasks) {
+            task.putIfAbsent('dueDate', () => null);
+
+            task.putIfAbsent('reminder', () => 'None');
+
+            task.putIfAbsent('due', () => 'No date');
+
+            task.putIfAbsent('priority', () => 'Medium');
+
+            task.putIfAbsent('completed', () => false);
+
+            task.putIfAbsent('notificationId', () => null);
+          }
+
+          await _saveTasks();
         } else {
           _tasks = _defaultTasks
               .map((task) => Map<String, dynamic>.from(task))
@@ -124,6 +150,14 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   // ============================================================
+  // GENERATE NOTIFICATION ID
+  // ============================================================
+
+  int _generateNotificationId() {
+    return DateTime.now().microsecondsSinceEpoch.remainder(2147483647);
+  }
+
+  // ============================================================
   // ADD TASK
   // ============================================================
 
@@ -132,10 +166,10 @@ class _TasksScreenState extends State<TasksScreen> {
       return;
     }
 
-    final result = await showDialog<Map<String, String>>(
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const _AddTaskDialog(),
+      builder: (_) => const _TaskDialog(),
     );
 
     if (!mounted || result == null) {
@@ -148,12 +182,25 @@ class _TasksScreenState extends State<TasksScreen> {
       return;
     }
 
+    final title = result['title']?.toString() ?? '';
+
+    final subject = result['subject']?.toString() ?? 'General';
+
+    final DateTime? dueDate = result['dueDate'] as DateTime?;
+
+    final reminder = result['reminder']?.toString() ?? 'None';
+
+    final notificationId = _generateNotificationId();
+
     final newTask = <String, dynamic>{
-      'title': result['title'] ?? '',
-      'subject': result['subject'] ?? 'General',
-      'due': 'No date',
+      'title': title,
+      'subject': subject,
+      'due': dueDate == null ? 'No date' : _formatDateTime(dueDate),
+      'dueDate': dueDate?.toIso8601String(),
+      'reminder': reminder,
       'priority': 'Medium',
       'completed': false,
+      'notificationId': notificationId,
     };
 
     setState(() {
@@ -162,11 +209,102 @@ class _TasksScreenState extends State<TasksScreen> {
 
     await _saveTasks();
 
+    // Schedule reminder.
+    if (dueDate != null && reminder != 'None') {
+      await _scheduleTaskReminder(task: newTask);
+    }
+
     if (!mounted) {
       return;
     }
 
-    _showMessage('Task added successfully.');
+    _showMessage(
+      reminder == 'None'
+          ? 'Task added successfully.'
+          : 'Task added and reminder scheduled.',
+    );
+  }
+
+  // ============================================================
+  // SCHEDULE TASK REMINDER
+  // ============================================================
+
+  Future<void> _scheduleTaskReminder({
+    required Map<String, dynamic> task,
+  }) async {
+    final dueDateString = task['dueDate']?.toString();
+
+    if (dueDateString == null || dueDateString.isEmpty) {
+      return;
+    }
+
+    final dueDate = DateTime.tryParse(dueDateString);
+
+    if (dueDate == null) {
+      return;
+    }
+
+    final reminder = task['reminder']?.toString() ?? 'None';
+
+    final title = task['title']?.toString() ?? 'Task';
+
+    final subject = task['subject']?.toString() ?? 'General';
+
+    final notificationId = task['notificationId'] as int?;
+
+    if (notificationId == null) {
+      return;
+    }
+
+    DateTime notificationTime = dueDate;
+
+    switch (reminder) {
+      case '15 minutes before':
+        notificationTime = dueDate.subtract(const Duration(minutes: 15));
+        break;
+
+      case '30 minutes before':
+        notificationTime = dueDate.subtract(const Duration(minutes: 30));
+        break;
+
+      case '1 hour before':
+        notificationTime = dueDate.subtract(const Duration(hours: 1));
+        break;
+
+      case '1 day before':
+        notificationTime = dueDate.subtract(const Duration(days: 1));
+        break;
+
+      case 'None':
+        return;
+    }
+
+    if (notificationTime.isBefore(DateTime.now())) {
+      debugPrint('Reminder is already in the past.');
+
+      return;
+    }
+
+    await NotificationService.instance.scheduleNotification(
+      id: notificationId,
+      title: 'Task Reminder',
+      body: '$title • $subject',
+      scheduledDate: notificationTime,
+    );
+  }
+
+  // ============================================================
+  // CANCEL TASK REMINDER
+  // ============================================================
+
+  Future<void> _cancelTaskReminder(Map<String, dynamic> task) async {
+    final notificationId = task['notificationId'] as int?;
+
+    if (notificationId == null) {
+      return;
+    }
+
+    await NotificationService.instance.cancelNotification(notificationId);
   }
 
   // ============================================================
@@ -178,13 +316,47 @@ class _TasksScreenState extends State<TasksScreen> {
       return;
     }
 
-    setState(() {
-      final currentValue = _tasks[index]['completed'];
+    final task = _tasks[index];
 
-      _tasks[index]['completed'] = currentValue == true ? false : true;
-    });
+    final currentValue = task['completed'] == true;
 
-    await _saveTasks();
+    if (currentValue) {
+      // --------------------------------------------------------
+      // TASK IS BEING MARKED INCOMPLETE
+      // --------------------------------------------------------
+
+      setState(() {
+        task['completed'] = false;
+      });
+
+      await _saveTasks();
+
+      final reminder = task['reminder']?.toString() ?? 'None';
+
+      if (reminder != 'None') {
+        await _scheduleTaskReminder(task: task);
+      }
+
+      if (mounted) {
+        _showMessage('Task marked as incomplete.');
+      }
+    } else {
+      // --------------------------------------------------------
+      // TASK IS BEING COMPLETED
+      // --------------------------------------------------------
+
+      await _cancelTaskReminder(task);
+
+      setState(() {
+        task['completed'] = true;
+      });
+
+      await _saveTasks();
+
+      if (mounted) {
+        _showMessage('Task completed. Reminder cancelled.');
+      }
+    }
   }
 
   // ============================================================
@@ -205,9 +377,7 @@ class _TasksScreenState extends State<TasksScreen> {
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Delete Task'),
-
           content: Text('Are you sure you want to delete "$taskTitle"?'),
-
           actions: [
             TextButton(
               onPressed: () {
@@ -215,7 +385,6 @@ class _TasksScreenState extends State<TasksScreen> {
               },
               child: const Text('Cancel'),
             ),
-
             FilledButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop(true);
@@ -235,6 +404,9 @@ class _TasksScreenState extends State<TasksScreen> {
       return;
     }
 
+    // Cancel reminder before deleting.
+    await _cancelTaskReminder(task);
+
     setState(() {
       _tasks.removeAt(index);
     });
@@ -246,6 +418,101 @@ class _TasksScreenState extends State<TasksScreen> {
     }
 
     _showMessage('Task deleted.');
+  }
+
+  // ============================================================
+  // EDIT TASK
+  // ============================================================
+
+  Future<void> _editTask(int index) async {
+    if (index < 0 || index >= _tasks.length) {
+      return;
+    }
+
+    final originalTask = _tasks[index];
+
+    final dueDateString = originalTask['dueDate']?.toString();
+
+    DateTime? existingDueDate;
+
+    if (dueDateString != null && dueDateString.isNotEmpty) {
+      existingDueDate = DateTime.tryParse(dueDateString);
+    }
+
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _TaskDialog(
+        existingTitle: originalTask['title']?.toString(),
+        existingSubject: originalTask['subject']?.toString(),
+        existingDueDate: existingDueDate,
+        existingReminder: originalTask['reminder']?.toString(),
+      ),
+    );
+
+    if (!mounted || result == null) {
+      return;
+    }
+
+    // Cancel old reminder first.
+    await _cancelTaskReminder(originalTask);
+
+    final title = result['title']?.toString() ?? '';
+
+    final subject = result['subject']?.toString() ?? 'General';
+
+    final DateTime? dueDate = result['dueDate'] as DateTime?;
+
+    final reminder = result['reminder']?.toString() ?? 'None';
+
+    final notificationId =
+        originalTask['notificationId'] as int? ?? _generateNotificationId();
+
+    final updatedTask = <String, dynamic>{
+      'title': title,
+      'subject': subject,
+      'due': dueDate == null ? 'No date' : _formatDateTime(dueDate),
+      'dueDate': dueDate?.toIso8601String(),
+      'reminder': reminder,
+      'priority': originalTask['priority'] ?? 'Medium',
+      'completed': originalTask['completed'] == true,
+      'notificationId': notificationId,
+    };
+
+    setState(() {
+      _tasks[index] = updatedTask;
+    });
+
+    await _saveTasks();
+
+    // Only schedule if task isn't completed.
+    if (updatedTask['completed'] != true &&
+        dueDate != null &&
+        reminder != 'None') {
+      await _scheduleTaskReminder(task: updatedTask);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    _showMessage('Task updated successfully.');
+  }
+
+  // ============================================================
+  // FORMAT DATE AND TIME
+  // ============================================================
+
+  String _formatDateTime(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+
+    final month = date.month.toString().padLeft(2, '0');
+
+    final hour = date.hour.toString().padLeft(2, '0');
+
+    final minute = date.minute.toString().padLeft(2, '0');
+
+    return '$day/$month/${date.year} $hour:$minute';
   }
 
   // ============================================================
@@ -300,7 +567,8 @@ class _TasksScreenState extends State<TasksScreen> {
       body: _tasks.isEmpty
           ? const Center(
               child: Text(
-                'No tasks yet.\nTap + to add your first task.',
+                'No tasks yet.\n'
+                'Tap + to add your first task.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 18),
               ),
@@ -317,9 +585,7 @@ class _TasksScreenState extends State<TasksScreen> {
                     child: Row(
                       children: [
                         const Icon(Icons.check_circle_outline, size: 32),
-
                         const SizedBox(width: 12),
-
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -331,9 +597,7 @@ class _TasksScreenState extends State<TasksScreen> {
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-
                               const SizedBox(height: 4),
-
                               Text(
                                 '$completedTasks of '
                                 '${_tasks.length} '
@@ -363,7 +627,6 @@ class _TasksScreenState extends State<TasksScreen> {
                         ),
                       ),
                     ),
-
                     Text(
                       '${_tasks.length}',
                       style: TextStyle(
@@ -390,15 +653,16 @@ class _TasksScreenState extends State<TasksScreen> {
 
                   final priority = task['priority']?.toString() ?? 'Medium';
 
+                  final reminder = task['reminder']?.toString() ?? 'None';
+
                   final completed = task['completed'] == true;
 
                   return Card(
                     margin: const EdgeInsets.only(bottom: 10),
-
                     child: ListTile(
-                      // ==========================================
+                      // ========================================
                       // CHECKBOX
-                      // ==========================================
+                      // ========================================
                       leading: Checkbox(
                         value: completed,
                         onChanged: (_) {
@@ -406,9 +670,9 @@ class _TasksScreenState extends State<TasksScreen> {
                         },
                       ),
 
-                      // ==========================================
+                      // ========================================
                       // TASK TITLE
-                      // ==========================================
+                      // ========================================
                       title: Text(
                         title,
                         style: TextStyle(
@@ -419,34 +683,55 @@ class _TasksScreenState extends State<TasksScreen> {
                         ),
                       ),
 
-                      // ==========================================
+                      // ========================================
                       // TASK DETAILS
-                      // ==========================================
-                      subtitle: Text('$subject • Due $due'),
+                      // ========================================
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('$subject • Due $due'),
+                          if (reminder != 'None') ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.notifications_none, size: 16),
+                                const SizedBox(width: 4),
+                                Text(
+                                  reminder,
+                                  style: const TextStyle(fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
 
-                      // ==========================================
-                      // PRIORITY
-                      // ==========================================
+                      // ========================================
+                      // OPTIONS
+                      // ========================================
                       trailing: PopupMenuButton<String>(
                         tooltip: 'Task options',
-
                         icon: const Icon(Icons.more_vert),
-
                         onSelected: (value) {
+                          if (value == 'edit') {
+                            _editTask(index);
+                          }
+
                           if (value == 'delete') {
                             _deleteTask(index);
                           }
                         },
-
                         itemBuilder: (context) {
                           return [
                             PopupMenuItem<String>(
                               enabled: false,
                               child: Text('Priority: $priority'),
                             ),
-
                             const PopupMenuDivider(),
-
+                            const PopupMenuItem<String>(
+                              value: 'edit',
+                              child: Text('Edit'),
+                            ),
                             const PopupMenuItem<String>(
                               value: 'delete',
                               child: Text('Delete'),
@@ -473,22 +758,66 @@ class _TasksScreenState extends State<TasksScreen> {
 }
 
 // ============================================================
-// ADD TASK DIALOG
+// TASK DIALOG
 // ============================================================
 
-class _AddTaskDialog extends StatefulWidget {
-  const _AddTaskDialog();
+class _TaskDialog extends StatefulWidget {
+  const _TaskDialog({
+    this.existingTitle,
+    this.existingSubject,
+    this.existingDueDate,
+    this.existingReminder,
+  });
+
+  final String? existingTitle;
+
+  final String? existingSubject;
+
+  final DateTime? existingDueDate;
+
+  final String? existingReminder;
 
   @override
-  State<_AddTaskDialog> createState() => _AddTaskDialogState();
+  State<_TaskDialog> createState() => _TaskDialogState();
 }
 
-class _AddTaskDialogState extends State<_AddTaskDialog> {
-  final TextEditingController _titleController = TextEditingController();
+class _TaskDialogState extends State<_TaskDialog> {
+  // ==========================================================
+  // CONTROLLERS
+  // ==========================================================
 
-  final TextEditingController _subjectController = TextEditingController();
+  late final TextEditingController _titleController;
+
+  late final TextEditingController _subjectController;
+
+  // ==========================================================
+  // STATE
+  // ==========================================================
+
+  DateTime? _selectedDateTime;
+
+  late String _selectedReminder;
 
   String? _errorMessage;
+
+  // ==========================================================
+  // INITIALIZE
+  // ==========================================================
+
+  @override
+  void initState() {
+    super.initState();
+
+    _titleController = TextEditingController(text: widget.existingTitle ?? '');
+
+    _subjectController = TextEditingController(
+      text: widget.existingSubject ?? '',
+    );
+
+    _selectedDateTime = widget.existingDueDate;
+
+    _selectedReminder = widget.existingReminder ?? 'None';
+  }
 
   // ==========================================================
   // DISPOSE
@@ -497,9 +826,124 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
   @override
   void dispose() {
     _titleController.dispose();
+
     _subjectController.dispose();
 
     super.dispose();
+  }
+
+  // ==========================================================
+  // SELECT DATE
+  // ==========================================================
+
+  Future<void> _selectDate() async {
+    final now = DateTime.now();
+
+    final initialDate = _selectedDateTime ?? now;
+
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: initialDate.isBefore(now) ? now : initialDate,
+      firstDate: now,
+      lastDate: DateTime(now.year + 5),
+    );
+
+    if (!mounted || pickedDate == null) {
+      return;
+    }
+
+    TimeOfDay initialTime = TimeOfDay.now();
+
+    if (_selectedDateTime != null) {
+      initialTime = TimeOfDay(
+        hour: _selectedDateTime!.hour,
+        minute: _selectedDateTime!.minute,
+      );
+    }
+
+    setState(() {
+      _selectedDateTime = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        initialTime.hour,
+        initialTime.minute,
+      );
+
+      _errorMessage = null;
+    });
+  }
+
+  // ==========================================================
+  // SELECT TIME
+  // ==========================================================
+
+  Future<void> _selectTime() async {
+    if (_selectedDateTime == null) {
+      setState(() {
+        _errorMessage = 'Please select a due date first.';
+      });
+
+      return;
+    }
+
+    final initialTime = TimeOfDay(
+      hour: _selectedDateTime!.hour,
+      minute: _selectedDateTime!.minute,
+    );
+
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+    );
+
+    if (!mounted || pickedTime == null) {
+      return;
+    }
+
+    setState(() {
+      _selectedDateTime = DateTime(
+        _selectedDateTime!.year,
+        _selectedDateTime!.month,
+        _selectedDateTime!.day,
+        pickedTime.hour,
+        pickedTime.minute,
+      );
+
+      _errorMessage = null;
+    });
+  }
+
+  // ==========================================================
+  // FORMAT DATE
+  // ==========================================================
+
+  String _formatDate() {
+    if (_selectedDateTime == null) {
+      return 'No date selected';
+    }
+
+    final day = _selectedDateTime!.day.toString().padLeft(2, '0');
+
+    final month = _selectedDateTime!.month.toString().padLeft(2, '0');
+
+    return '$day/$month/${_selectedDateTime!.year}';
+  }
+
+  // ==========================================================
+  // FORMAT TIME
+  // ==========================================================
+
+  String _formatTime() {
+    if (_selectedDateTime == null) {
+      return 'No time selected';
+    }
+
+    final hour = _selectedDateTime!.hour.toString().padLeft(2, '0');
+
+    final minute = _selectedDateTime!.minute.toString().padLeft(2, '0');
+
+    return '$hour:$minute';
   }
 
   // ==========================================================
@@ -527,11 +971,36 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
       return;
     }
 
+    if (_selectedReminder != 'None' && _selectedDateTime == null) {
+      setState(() {
+        _errorMessage =
+            'Please select a due date and time '
+            'before choosing a reminder.';
+      });
+
+      return;
+    }
+
+    if (_selectedDateTime != null &&
+        _selectedDateTime!.isBefore(DateTime.now()) &&
+        _selectedReminder != 'None') {
+      setState(() {
+        _errorMessage =
+            'The due date and time must be in the '
+            'future when using a reminder.';
+      });
+
+      return;
+    }
+
     FocusManager.instance.primaryFocus?.unfocus();
 
-    Navigator.of(
-      context,
-    ).pop({'title': title, 'subject': subject.isEmpty ? 'General' : subject});
+    Navigator.of(context).pop({
+      'title': title,
+      'subject': subject.isEmpty ? 'General' : subject,
+      'dueDate': _selectedDateTime,
+      'reminder': _selectedReminder,
+    });
   }
 
   // ==========================================================
@@ -540,8 +1009,10 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final isEditing = widget.existingTitle != null;
+
     return AlertDialog(
-      title: const Text('Add Task'),
+      title: Text(isEditing ? 'Edit Task' : 'Add Task'),
 
       content: SingleChildScrollView(
         child: Column(
@@ -554,18 +1025,15 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
-
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(),
                 ),
-
                 child: Text(
                   _errorMessage!,
                   style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
               ),
-
               const SizedBox(height: 16),
             ],
 
@@ -574,9 +1042,8 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
             // ==================================================
             TextField(
               controller: _titleController,
-              autofocus: true,
+              autofocus: !isEditing,
               textInputAction: TextInputAction.next,
-
               onChanged: (_) {
                 if (_errorMessage != null) {
                   setState(() {
@@ -584,7 +1051,6 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
                   });
                 }
               },
-
               decoration: const InputDecoration(
                 labelText: 'Task name',
                 hintText: 'e.g. Complete assignment',
@@ -601,17 +1067,87 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
             TextField(
               controller: _subjectController,
               textInputAction: TextInputAction.done,
-
-              onSubmitted: (_) {
-                _submit();
-              },
-
               decoration: const InputDecoration(
                 labelText: 'Subject',
                 hintText: 'e.g. Programming',
                 prefixIcon: Icon(Icons.school_outlined),
                 border: OutlineInputBorder(),
               ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // ==================================================
+            // DUE DATE
+            // ==================================================
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _selectDate,
+                icon: const Icon(Icons.calendar_month),
+                label: Text(
+                  _selectedDateTime == null ? 'Select due date' : _formatDate(),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // ==================================================
+            // DUE TIME
+            // ==================================================
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _selectTime,
+                icon: const Icon(Icons.access_time),
+                label: Text(
+                  _selectedDateTime == null ? 'Select due time' : _formatTime(),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // ==================================================
+            // REMINDER
+            // ==================================================
+            DropdownButtonFormField<String>(
+              initialValue: _selectedReminder,
+              decoration: const InputDecoration(
+                labelText: 'Reminder',
+                prefixIcon: Icon(Icons.notifications_none),
+                border: OutlineInputBorder(),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'None', child: Text('No reminder')),
+                DropdownMenuItem(
+                  value: '15 minutes before',
+                  child: Text('15 minutes before'),
+                ),
+                DropdownMenuItem(
+                  value: '30 minutes before',
+                  child: Text('30 minutes before'),
+                ),
+                DropdownMenuItem(
+                  value: '1 hour before',
+                  child: Text('1 hour before'),
+                ),
+                DropdownMenuItem(
+                  value: '1 day before',
+                  child: Text('1 day before'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+
+                setState(() {
+                  _selectedReminder = value;
+                  _errorMessage = null;
+                });
+              },
             ),
           ],
         ),
@@ -629,8 +1165,10 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
           },
           child: const Text('Cancel'),
         ),
-
-        FilledButton(onPressed: _submit, child: const Text('Add')),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(isEditing ? 'Save' : 'Add'),
+        ),
       ],
     );
   }
