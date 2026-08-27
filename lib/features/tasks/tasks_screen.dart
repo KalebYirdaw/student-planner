@@ -97,15 +97,10 @@ class _TasksScreenState extends State<TasksScreen> {
           // Add fields introduced in newer versions.
           for (final task in _tasks) {
             task.putIfAbsent('dueDate', () => null);
-
             task.putIfAbsent('reminder', () => 'None');
-
             task.putIfAbsent('due', () => 'No date');
-
             task.putIfAbsent('priority', () => 'Medium');
-
             task.putIfAbsent('completed', () => false);
-
             task.putIfAbsent('notificationId', () => null);
           }
 
@@ -145,7 +140,7 @@ class _TasksScreenState extends State<TasksScreen> {
 
       await preferences.setString(_tasksStorageKey, encodedTasks);
     } catch (_) {
-      // Keep the app functional if local storage fails.
+      // Keep app functional if local storage fails.
     }
   }
 
@@ -209,39 +204,50 @@ class _TasksScreenState extends State<TasksScreen> {
 
     await _saveTasks();
 
-    // Schedule reminder.
+    // ----------------------------------------------------------
+    // SCHEDULE REMINDER
+    // ----------------------------------------------------------
+
+    bool reminderScheduled = false;
+
     if (dueDate != null && reminder != 'None') {
-      await _scheduleTaskReminder(task: newTask);
+      reminderScheduled = await _scheduleTaskReminder(task: newTask);
     }
 
     if (!mounted) {
       return;
     }
 
-    _showMessage(
-      reminder == 'None'
-          ? 'Task added successfully.'
-          : 'Task added and reminder scheduled.',
-    );
+    if (reminder == 'None') {
+      _showMessage('Task added successfully.');
+    } else if (reminderScheduled) {
+      _showMessage('Task added and reminder scheduled.');
+    } else {
+      _showMessage('Task added, but the reminder could not be scheduled.');
+    }
   }
 
   // ============================================================
   // SCHEDULE TASK REMINDER
   // ============================================================
 
-  Future<void> _scheduleTaskReminder({
+  Future<bool> _scheduleTaskReminder({
     required Map<String, dynamic> task,
   }) async {
     final dueDateString = task['dueDate']?.toString();
 
     if (dueDateString == null || dueDateString.isEmpty) {
-      return;
+      debugPrint('Reminder not scheduled: no due date.');
+
+      return false;
     }
 
     final dueDate = DateTime.tryParse(dueDateString);
 
     if (dueDate == null) {
-      return;
+      debugPrint('Reminder not scheduled: invalid due date.');
+
+      return false;
     }
 
     final reminder = task['reminder']?.toString() ?? 'None';
@@ -253,12 +259,22 @@ class _TasksScreenState extends State<TasksScreen> {
     final notificationId = task['notificationId'] as int?;
 
     if (notificationId == null) {
-      return;
+      debugPrint('Reminder not scheduled: no notification ID.');
+
+      return false;
     }
 
     DateTime notificationTime = dueDate;
 
+    // ----------------------------------------------------------
+    // CALCULATE REMINDER TIME
+    // ----------------------------------------------------------
+
     switch (reminder) {
+      case '5 minutes before':
+        notificationTime = dueDate.subtract(const Duration(minutes: 5));
+        break;
+
       case '15 minutes before':
         notificationTime = dueDate.subtract(const Duration(minutes: 15));
         break;
@@ -276,21 +292,57 @@ class _TasksScreenState extends State<TasksScreen> {
         break;
 
       case 'None':
-        return;
+        return false;
+
+      default:
+        return false;
     }
 
-    if (notificationTime.isBefore(DateTime.now())) {
+    // ----------------------------------------------------------
+    // CHECK REMINDER TIME
+    // ----------------------------------------------------------
+
+    final now = DateTime.now();
+
+    if (notificationTime.isBefore(now) ||
+        notificationTime.isAtSameMomentAs(now)) {
       debugPrint('Reminder is already in the past.');
 
-      return;
+      debugPrint('Current time: $now');
+
+      debugPrint('Reminder time: $notificationTime');
+
+      return false;
     }
 
-    await NotificationService.instance.scheduleNotification(
-      id: notificationId,
-      title: 'Task Reminder',
-      body: '$title • $subject',
-      scheduledDate: notificationTime,
-    );
+    // ----------------------------------------------------------
+    // SCHEDULE NOTIFICATION
+    // ----------------------------------------------------------
+
+    try {
+      final scheduled = await NotificationService.instance.scheduleNotification(
+        id: notificationId,
+        title: 'Task Reminder',
+        body: '$title • $subject',
+        scheduledDate: notificationTime,
+      );
+
+      if (scheduled) {
+        debugPrint('TASK REMINDER SUCCESS');
+
+        debugPrint('Task: $title');
+
+        debugPrint('Reminder: $reminder');
+
+        debugPrint('Notification time: $notificationTime');
+      }
+
+      return scheduled;
+    } catch (error) {
+      debugPrint('Failed to schedule task reminder: $error');
+
+      return false;
+    }
   }
 
   // ============================================================
@@ -322,7 +374,7 @@ class _TasksScreenState extends State<TasksScreen> {
 
     if (currentValue) {
       // --------------------------------------------------------
-      // TASK IS BEING MARKED INCOMPLETE
+      // TASK MARKED INCOMPLETE
       // --------------------------------------------------------
 
       setState(() {
@@ -333,16 +385,24 @@ class _TasksScreenState extends State<TasksScreen> {
 
       final reminder = task['reminder']?.toString() ?? 'None';
 
+      bool reminderScheduled = false;
+
       if (reminder != 'None') {
-        await _scheduleTaskReminder(task: task);
+        reminderScheduled = await _scheduleTaskReminder(task: task);
       }
 
-      if (mounted) {
+      if (!mounted) {
+        return;
+      }
+
+      if (reminderScheduled) {
+        _showMessage('Task marked incomplete. Reminder rescheduled.');
+      } else {
         _showMessage('Task marked as incomplete.');
       }
     } else {
       // --------------------------------------------------------
-      // TASK IS BEING COMPLETED
+      // TASK MARKED COMPLETE
       // --------------------------------------------------------
 
       await _cancelTaskReminder(task);
@@ -485,18 +545,26 @@ class _TasksScreenState extends State<TasksScreen> {
 
     await _saveTasks();
 
+    bool reminderScheduled = false;
+
     // Only schedule if task isn't completed.
     if (updatedTask['completed'] != true &&
         dueDate != null &&
         reminder != 'None') {
-      await _scheduleTaskReminder(task: updatedTask);
+      reminderScheduled = await _scheduleTaskReminder(task: updatedTask);
     }
 
     if (!mounted) {
       return;
     }
 
-    _showMessage('Task updated successfully.');
+    if (reminder == 'None') {
+      _showMessage('Task updated successfully.');
+    } else if (reminderScheduled) {
+      _showMessage('Task updated and reminder scheduled.');
+    } else {
+      _showMessage('Task updated, but the reminder could not be scheduled.');
+    }
   }
 
   // ============================================================
@@ -843,8 +911,10 @@ class _TaskDialogState extends State<_TaskDialog> {
 
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: initialDate.isBefore(now) ? now : initialDate,
-      firstDate: now,
+      initialDate: initialDate.isBefore(DateTime(now.year, now.month, now.day))
+          ? now
+          : initialDate,
+      firstDate: DateTime(now.year, now.month, now.day),
       lastDate: DateTime(now.year + 5),
     );
 
@@ -993,6 +1063,52 @@ class _TaskDialogState extends State<_TaskDialog> {
       return;
     }
 
+    // ----------------------------------------------------------
+    // CHECK WHETHER REMINDER TIME IS ALREADY PAST
+    // ----------------------------------------------------------
+
+    if (_selectedDateTime != null && _selectedReminder != 'None') {
+      DateTime reminderTime = _selectedDateTime!;
+
+      switch (_selectedReminder) {
+        case '5 minutes before':
+          reminderTime = _selectedDateTime!.subtract(
+            const Duration(minutes: 5),
+          );
+          break;
+
+        case '15 minutes before':
+          reminderTime = _selectedDateTime!.subtract(
+            const Duration(minutes: 15),
+          );
+          break;
+
+        case '30 minutes before':
+          reminderTime = _selectedDateTime!.subtract(
+            const Duration(minutes: 30),
+          );
+          break;
+
+        case '1 hour before':
+          reminderTime = _selectedDateTime!.subtract(const Duration(hours: 1));
+          break;
+
+        case '1 day before':
+          reminderTime = _selectedDateTime!.subtract(const Duration(days: 1));
+          break;
+      }
+
+      if (!reminderTime.isAfter(DateTime.now())) {
+        setState(() {
+          _errorMessage =
+              'The selected reminder time has already passed. '
+              'Choose a later due time.';
+        });
+
+        return;
+      }
+    }
+
     FocusManager.instance.primaryFocus?.unfocus();
 
     Navigator.of(context).pop({
@@ -1121,6 +1237,10 @@ class _TaskDialogState extends State<_TaskDialog> {
               ),
               items: const [
                 DropdownMenuItem(value: 'None', child: Text('No reminder')),
+                DropdownMenuItem(
+                  value: '5 minutes before',
+                  child: Text('5 minutes before'),
+                ),
                 DropdownMenuItem(
                   value: '15 minutes before',
                   child: Text('15 minutes before'),

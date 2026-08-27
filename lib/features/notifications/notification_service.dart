@@ -92,9 +92,35 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
 
-    final granted = await androidPlugin?.requestNotificationsPermission();
+    if (androidPlugin == null) {
+      debugPrint('Android notification plugin is unavailable.');
 
-    return granted ?? false;
+      return false;
+    }
+
+    // ----------------------------------------------------------
+    // REQUEST NOTIFICATION PERMISSION
+    // ----------------------------------------------------------
+
+    final notificationGranted = await androidPlugin
+        .requestNotificationsPermission();
+
+    debugPrint('Notification permission: $notificationGranted');
+
+    // ----------------------------------------------------------
+    // REQUEST EXACT ALARM PERMISSION
+    // ----------------------------------------------------------
+
+    final exactAlarmGranted = await androidPlugin
+        .requestExactAlarmsPermission();
+
+    debugPrint('Exact alarm permission: $exactAlarmGranted');
+
+    // ----------------------------------------------------------
+    // RETURN FINAL PERMISSION STATUS
+    // ----------------------------------------------------------
+
+    return notificationGranted == true && exactAlarmGranted == true;
   }
 
   // ============================================================
@@ -117,7 +143,6 @@ class NotificationService {
       title: 'Student Planner',
       body: 'Notifications are working!',
       notificationDetails: notificationDetails,
-      payload: 'test_notification',
     );
   }
 
